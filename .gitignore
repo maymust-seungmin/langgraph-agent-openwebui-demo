@@ -1,0 +1,17 @@
+__pycache__
+.env
+
+/litellm
+
+pipelines/*
+!pipelines/.gitignore
+!pipelines/*.py
+.DS_Store
+
+.venv
+venv/
+
+poetry.lock
+
+langgraph_agents/ui
+langgraph_agents/utils
