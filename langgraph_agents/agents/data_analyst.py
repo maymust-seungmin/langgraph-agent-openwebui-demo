@@ -1,45 +1,40 @@
-import os, sys
+import os
+import sys
+
 sys.path.insert(0, os.path.abspath("."))
+
+from utils.agents.get_tables_info import get_tables_info
+from utils.agents.main import remove_think_tags
+
 from typing import Annotated, List
 from typing_extensions import TypedDict
-from logging import getLogger
-logger = getLogger(__name__)
 
-# LangGraph and LangChain imports
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage
 from langchain.tools import StructuredTool
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
+from langchain_ollama import ChatOllama
 
-from langgraph_agents.tools.local_python_executor import local_python_executor, BASE_BUILTIN_MODULES
+from langgraph_agents.tools.local_python_executor import (
+    local_python_executor,
+    BASE_BUILTIN_MODULES,
+)
 
-from dotenv import load_dotenv
-from pathlib import Path
-
-current_file = Path(__file__).resolve()
-project_root = current_file.parent.parent
-try:
-    load_dotenv(project_root / "config/.env")
-except Exception as e:
-    print(f"Warning: Failed to load .env file: {e}")
-
-try:
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-    if not OPENAI_API_KEY:
-        raise ValueError("OPENAI_API_KEY not found in environment variables")
-except Exception as e:
-    logger.error(f"Error loading OPENAI_API_KEY: {e}")
-    OPENAI_API_KEY = None
 
 from pydantic import BaseModel, Field
 from typing import Literal
-from pydantic.types import SecretStr
 
-DEFAULT_MODEL_NAME = "gpt-4o-mini"
 
-DEFAULT_SYSTEM_PROMPT = """You are Casey, an advanced data analyst assistant with expertise in data analysis, visualization, and problem-solving.
+DEFAULT_SYSTEM_PROMPT = """You are seungmin from south korea, an advanced data analyst assistant with expertise in data analysis, visualization, and problem-solving.
+
+Respond to the user's query in the same language they used.
+
+If English and Korean are mixed, use Korean.
+
+Respond in Korean if there is even one Korean word.
+
+한번 더 강조하지만, 한국어가 한 단어라도 있으면 반드시 한국어로 응답하도록 해.
 
 When approaching tasks, follow the ReAct framework (Reasoning + Acting):
 
@@ -70,7 +65,10 @@ Remember to:
 - When you write python code to run, you will use python_tool and execute the code, unless the user wants to approve or say otherwise.
 
 Your primary tool is the python_tool which allows you to execute Python code for data analysis tasks.
+
+when you wirte code, do not use print function.
 """
+
 
 DEFAULT_POSTGRES_PROMPT = """
 You have access to a PostgreSQL database for data analysis tasks. Follow these guidelines when working with the database:
@@ -89,14 +87,14 @@ import os
 from sqlalchemy import create_engine, inspect
 
 # Load environment variables securely
-load_dotenv('/Users/pisek/Documents/case-done-github/langgraph-agents/config/.env')
+load_dotenv()
 
 # Get credentials without printing them
 db_user = os.getenv('POSTGRES_USER')
 db_password = os.getenv('POSTGRES_PASSWORD')
-db_host = os.getenv('POSTGRES_HOST', 'localhost')
-db_port = os.getenv('POSTGRES_PORT', '5432')
-db_name = os.getenv('POSTGRES_DB', 'postgres')
+db_host = os.getenv('POSTGRES_HOST')
+db_port = os.getenv('POSTGRES_PORT')
+db_name = os.getenv('POSTGRES_DB')
 
 # Create connection string and engine
 connection_string = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
@@ -116,7 +114,7 @@ query = text("SELECT datname FROM pg_database WHERE datistemplate = false;")
 with engine.connect() as conn:
     result = conn.execute(query)
     databases = [row[0] for row in result]
-print("Databases:", databases)
+databases
 ```
 
 ### Examples of one way to use inspector (to get tables of a database)
@@ -126,14 +124,14 @@ import os
 from sqlalchemy import create_engine, inspect
 
 # Load environment variables securely
-load_dotenv('/Users/pisek/Documents/case-done-github/langgraph-agents/config/.env')
+load_dotenv()
 
 # Get credentials without printing them
 db_user = os.getenv('POSTGRES_USER')
 db_password = os.getenv('POSTGRES_PASSWORD')
 db_host = os.getenv('POSTGRES_HOST', 'localhost')
 db_port = os.getenv('POSTGRES_PORT', '5432')
-db_name = 'coffee-shop'  # Specify the database name
+db_name = os.getenv("POSTGRES_DB", "postgres")
 
 # Create connection string and engine
 connection_string = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
@@ -144,7 +142,7 @@ inspector = inspect(engine)
 
 # Get the list of tables in the database
 tables = inspector.get_table_names()
-print(tables)
+tables
 ```
 
 ### Best Practices
@@ -154,39 +152,50 @@ print(tables)
 - Use pandas for efficient data manipulation after querying
 
 ### Security Notes
-- The .env file is located at: /Users/pisek/Documents/case-done-github/langgraph-agents/config/.env
 - Never display database credentials in your responses
 - Only read credentials from the .env file, never hardcode them
+
+Do not create queries that modify the database, such as UPDATE, INSERT, or DELETE, except for SELECT queries.
+
+use Database Schema Information suggest to user which table can help user's question if user's question is ambiguous.
 """
 
-DEFAULT_AUTHORIZED_IMPORTS = ['sqlalchemy', 'dotenv', 'os', 'sys', 'pandas']
+DEFAULT_AUTHORIZED_IMPORTS = ["sqlalchemy", "dotenv", "os", "sys", "pandas"]
 
-class Valves(BaseModel):
-    """Valves used for Open WebUI's Pipeline"""
-    MODEL_NAME: Literal["gpt-4o-mini", "gpt-4o", "o3-mini"] = Field(default=DEFAULT_MODEL_NAME, description="OpenAI")
-    AUTHORIZED_IMPORTS: str = Field(default=", ".join(DEFAULT_AUTHORIZED_IMPORTS), description="Authorized imports")
+DEFAULT_MODEL_NAME = "qwen3:30b-a3b"
 
-# Define the state for our graph
+
 class AgentState(TypedDict):
     messages: Annotated[List, add_messages]
 
-def get_llm(api_key: str = OPENAI_API_KEY, model_name: str = "gpt-4o-mini", **kwargs):
-    """Create an LLM instance"""
-    return ChatOpenAI(
-        api_key=api_key,
-        model=model_name,
-        **kwargs
+
+class Valves(BaseModel):
+    """Valves used for Open WebUI's Pipeline"""
+
+    MODEL_NAME: Literal["qwen3:32b", "qwen3:30b-a3b"] = Field(
+        default=DEFAULT_MODEL_NAME, description="qwen"
+    )
+    AUTHORIZED_IMPORTS: str = Field(
+        default=", ".join(DEFAULT_AUTHORIZED_IMPORTS), description="Authorized imports"
     )
 
+
+def get_llm():
+    return ChatOllama(model=DEFAULT_MODEL_NAME, keep_alive=-1)
+
+
+# DEFAULT_LLM = get_llm()
 DEFAULT_LLM = get_llm()
+
 
 def create_agent_builder(
     llm=DEFAULT_LLM,
     tools: List = [],
-    system_prompt: str = DEFAULT_SYSTEM_PROMPT+DEFAULT_POSTGRES_PROMPT,
-    authorized_imports: List[str] = DEFAULT_AUTHORIZED_IMPORTS
-    ):
-
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    + DEFAULT_POSTGRES_PROMPT
+    + get_tables_info(),
+    authorized_imports: List[str] = DEFAULT_AUTHORIZED_IMPORTS,
+):
     authorized_imports = list(set(BASE_BUILTIN_MODULES) | set(authorized_imports))
 
     def _local_python_executor(code: str):
@@ -203,8 +212,8 @@ def create_agent_builder(
     python_tool = StructuredTool.from_function(
         func=_local_python_executor,
         name="python_tool",
-        description="Execute Python code. Inputs: code (str)."
-        )
+        description="Execute Python code. Inputs: code (str).",
+    )
 
     DEFAULT_TOOLS = [python_tool]
 
@@ -217,23 +226,30 @@ def create_agent_builder(
         messages = state["messages"]
         payload = [SystemMessage(content=system_prompt)] + messages
         response = llm.invoke(payload)
+        response.content = remove_think_tags(response.content)
         return {"messages": response}
 
     LLM_NODE = "LLM_NODE"
     TOOLS_NAME = "tools"
-    
+
     builder = StateGraph(AgentState)
     builder.add_node(LLM_NODE, llm_node)
     builder.add_node(TOOLS_NAME, tools_node)
 
-    builder.add_conditional_edges(
-        LLM_NODE,
-        tools_condition
-    )
+    builder.add_conditional_edges(LLM_NODE, tools_condition)
     builder.add_edge(TOOLS_NAME, LLM_NODE)
     builder.set_entry_point(LLM_NODE)
-    
+
     return builder
+
 
 if __name__ == "__main__":
     builder = create_agent_builder()
+    graph = builder.compile()
+
+    inputs = {"messages": "디비를 참고해서 어떠한 투자가 괜찮을지 알려줘"}
+
+    for event in graph.stream(inputs, stream_mode="values"):
+        for i, value in enumerate(event.values()):
+            print(f"\n==============\nSTEP: {i + 1}\n==============\n")
+            print(value[-1])

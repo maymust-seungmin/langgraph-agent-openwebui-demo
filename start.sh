@@ -45,7 +45,6 @@ else
   echo "PIPELINES_REQUIREMENTS_PATH not specified. Skipping installation of requirements."
 fi
 
-
 # Function to download the pipeline files
 download_pipelines() {
   local path=$1
@@ -84,7 +83,7 @@ install_frontmatter_requirements() {
   local file=$1
   local file_content=$(cat "$1")
   # Extract the first triple-quoted block
-  local first_block=$(echo "$file_content" | awk '/"""/{flag=!flag; if(flag) count++; if(count == 2) {exit}} flag' )
+  local first_block=$(echo "$file_content" | awk '/"""/{flag=!flag; if(flag) count++; if(count == 2) {exit}} flag')
 
   # Check if the block contains requirements
   local requirements=$(echo "$first_block" | grep -i 'requirements:')
@@ -103,13 +102,18 @@ install_frontmatter_requirements() {
   fi
 }
 
-
 # Parse command line arguments for mode
-MODE="full"   # select a runmode ("setup", "run", "full" (setup + run))
+MODE="full" # select a runmode ("setup", "run", "full" (setup + run))
 while [[ "$#" -gt 0 ]]; do
   case $1 in
-    --mode) MODE="$2"; shift ;;
-    *) echo "Unknown parameter passed: $1"; exit 1 ;;
+  --mode)
+    MODE="$2"
+    shift
+    ;;
+  *)
+    echo "Unknown parameter passed: $1"
+    exit 1
+    ;;
   esac
   shift
 done
@@ -135,7 +139,7 @@ if [[ "$MODE" == "setup" || "$MODE" == "full" ]]; then
       mkdir -p "$PIPELINES_DIR"
     fi
 
-    IFS=';' read -ra ADDR <<< "$PIPELINES_URLS"
+    IFS=';' read -ra ADDR <<<"$PIPELINES_URLS"
     for path in "${ADDR[@]}"; do
       download_pipelines "$path" "$PIPELINES_DIR"
     done
@@ -152,6 +156,5 @@ fi
 
 if [[ "$MODE" == "run" || "$MODE" == "full" ]]; then
   echo "Running via Mode: $MODE"
-  uvicorn main:app --host "$HOST" --port "$PORT" --forwarded-allow-ips '*'
+  uv run uvicorn main:app --host "$HOST" --port "$PORT" --forwarded-allow-ips '*'
 fi
-
